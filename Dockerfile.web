@@ -1,0 +1,52 @@
+# --- Build stage ---
+# dioxus-cli must closely match the `dioxus` crate version pinned in
+# proxynexus-gui's Cargo.toml -- confirmed via a real build failure that
+# dx 0.7.9 (latest at time of writing) is incompatible with this project's
+# dioxus 0.7.5. If a future version bump in the repo breaks this again,
+# check the error message (it reports both versions directly) and update
+# the --version below to match.
+FROM rust:latest AS builder
+
+RUN apt-get update && apt-get install -y clang git && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add wasm32-unknown-unknown
+RUN cargo install dioxus-cli --version 0.7.5 --locked
+
+WORKDIR /app
+COPY proxynexus-rs/ /app/
+
+# Bake in the bundled catalog/collection metadata so the friend running
+# this never needs proxynexus-cli themselves -- it's just part of the
+# built image.
+#
+# IMPORTANT: `proxynexus-cli export` already gzip-compresses its output
+# (confirmed in db_storage.rs's export_sql, which writes through a
+# GzEncoder) -- and the web app's loader fetches "/init.sql.gz" specifically
+# and decompresses exactly one gzip layer (proxynexus-gui/src/main.rs).
+# Copying our already-gzip file in as plain "init.sql" was wrong: Dioxus's
+# build step then auto-generated its own .gz sibling by re-compressing
+# that file, producing a *doubly* gzip-compressed artifact that the app's
+# single-layer GzDecoder can't correctly read (confirmed via a real broken
+# deployment). Copying it in with the .gz extension already correct avoids
+# that -- Dioxus still generates an extra (unused) init.sql.gz.gz sibling,
+# which is harmless since nothing ever fetches that path.
+COPY data/init.sql /app/proxynexus-gui/public/init.sql.gz
+
+# This must be a build-time ENV (not just an ARG) so option_env!() in
+# proxynexus-gui/src/components/mod.rs actually sees it during compilation.
+ARG PROXYNEXUS_COLLECTIONS_URL
+ENV PROXYNEXUS_COLLECTIONS_URL=${PROXYNEXUS_COLLECTIONS_URL}
+
+RUN dx build --package proxynexus-gui --platform web --release
+
+# Find wherever dx actually put the built output -- this varies slightly
+# across dioxus-cli versions, so locate it rather than hardcoding a path.
+RUN mkdir -p /app/web-dist && \
+    OUT_DIR=$(find /app/target/dx -type d -name "public" | head -n1) && \
+    if [ -z "$OUT_DIR" ]; then echo "ERROR: could not find dx build output directory under /app/target/dx" >&2; exit 1; fi && \
+    cp -r "$OUT_DIR"/* /app/web-dist/
+
+# --- Runtime stage ---
+FROM nginx:alpine
+COPY --from=builder /app/web-dist /usr/share/nginx/html
+EXPOSE 80

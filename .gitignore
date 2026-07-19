@@ -1,0 +1,19 @@
+# The nested proxynexus-rs repo has its own separate git history and
+# remotes (origin/upstream) -- exclude it entirely so this outer repo
+# never touches it or creates a gitlink entry for it.
+proxynexus-rs/
+
+# Card images -- large binary data, not something to version in git.
+# data/init.sql (catalog + collection metadata) IS worth tracking, it's
+# small and text-based.
+data/collections/
+
+# Has your real MinIO password and Docker host IP. .env.example stays
+# tracked as the template instead.
+.env
+
+# Build artifacts -- reproducible from data/ + the catalog, no need to
+# version them.
+*.pnx
+*.pdf
+*_mpc.zip
