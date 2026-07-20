@@ -56,3 +56,9 @@ services:
 
 volumes:
   minio-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.99.10.0/24 
