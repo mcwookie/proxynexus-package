@@ -44,10 +44,15 @@ Then open `http://<this-machine's-ip>:8050` in a browser.
   the original project's Cloudflare R2 bucket, which this fork doesn't
   have credentials for. Serves card images to the web app.
 - **web** — the Dioxus web frontend, built from `proxynexus-rs/proxynexus-gui`
-  with a patch (`proxynexus-rs/proxynexus-gui/src/components/mod.rs`)
-  that makes the image-serving base URL configurable at build time
-  (`PROXYNEXUS_COLLECTIONS_URL`) instead of hardcoded to the upstream
-  maintainer's bucket.
+  with a patch that makes the image-serving base URL configurable at
+  build time (`PROXYNEXUS_COLLECTIONS_URL`) instead of hardcoded to the
+  upstream maintainer's bucket. This override has to live in **two**
+  places — `proxynexus-gui/src/components/mod.rs`'s `build_image_url`
+  (preview thumbnails) and `proxynexus-core/src/image_provider.rs`'s
+  `RemoteImageProvider` (PDF/MPC generation). The second one was missed
+  in the original patch, which silently broke Generate for every game
+  until it was caught and fixed — see `UPSTREAM_SYNC.md` and
+  `SETUP.md`'s troubleshooting section.
 
 ## Other docs in this repo
 

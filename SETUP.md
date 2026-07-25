@@ -113,3 +113,16 @@ machine.
   confirm the `dx build` output was found (`find /app/target/dx -type d
   -name "public"` inside the builder stage — if `dx`'s output directory
   convention changed between versions, this may need adjusting).
+- **Clicking Generate (PDF or MPC) does nothing — no output, no visible
+  error**: `PROXYNEXUS_COLLECTIONS_URL` needs to be applied in **two**
+  separate places, and generation only exercises the second one:
+  `proxynexus-gui/src/components/mod.rs`'s `build_image_url` (preview
+  thumbnails) and `proxynexus-core/src/image_provider.rs`'s
+  `RemoteImageProvider` (PDF/MPC generation). If only the first one has
+  the override, thumbnails load fine but every image fetch during
+  generation 404s against the upstream `collections.proxynexus.net`
+  bucket instead of your own MinIO — and the failure is only logged to
+  the browser devtools console, never surfaced in the UI. Confirm both
+  files have the override (check `proxynexus-core/src/image_provider.rs`
+  for `option_env!("PROXYNEXUS_COLLECTIONS_URL")`), then rebuild with
+  `docker compose build web --no-cache`.
