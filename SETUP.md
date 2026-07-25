@@ -48,8 +48,9 @@ proxynexus-package/
    ```bash
    docker compose up -d --build
    ```
-   Open `http://<docker-host-ip>:8050`, select Marvel Champions, pick a
-   set, and confirm actual card *images* load (not just names with gray
+   Open `http://<docker-host-ip>:8050`, select Marvel Champions (and, if
+   its collection is loaded too, Arkham Horror LCG), pick a set for each,
+   and confirm actual card *images* load (not just names with gray
    boxes). Once confirmed, zip up the whole `proxynexus-package/` folder
    and send it over.
 
@@ -94,9 +95,9 @@ machine.
   Docker Hub.
 - **Game doesn't appear in the dropdown at all**: `data/init.sql` is
   missing that game's data, or is stale. Check with:
-  `zcat data/init.sql | grep -c marvel_champions` (should be non-zero).
-  If it's zero, re-export (see above) and rebuild with
-  `docker compose build web --no-cache`.
+  `zcat data/init.sql | grep -c marvel_champions` (or `ahlcg` for Arkham
+  Horror LCG) — should be non-zero. If it's zero, re-export (see above)
+  and rebuild with `docker compose build web --no-cache`.
 - **Sets show up, but card images are gray boxes with no picture**: two
   likely causes, check in this order:
   1. `PROXYNEXUS_COLLECTIONS_URL` in `.env` is set to `localhost` but

@@ -1,8 +1,9 @@
-# Proxy Nexus — self-hosted Marvel Champions deployment
+# Proxy Nexus — self-hosted Marvel Champions & Arkham Horror LCG deployment
 
 A self-hosted Docker deployment of [Proxy Nexus](https://github.com/mcwookie/proxynexus-rs)
 (a proxy card generator, originally for Netrunner/L5R/AGoT/LotR LCG) with
-a custom-built [Marvel Champions](https://marvelcdb.com) adapter, plus a
+custom-built [Marvel Champions](https://marvelcdb.com) and
+[Arkham Horror: The Card Game](https://arkhamdb.com) adapters, plus a
 MinIO-backed web frontend for browsing/generating proxies from a browser
 instead of the CLI.
 
@@ -54,9 +55,12 @@ Then open `http://<this-machine's-ip>:8050` in a browser.
   covering everything that came up building this the first time (MinIO
   CPU compatibility, stale exports, the localhost/IP trap, a gzip
   filename mismatch in the init.sql loading path).
-- **`UPDATING_COLLECTION.md`** — how to add a new Marvel Champions
-  expansion, or fix a mis-matched/missing card, once MarvelCDB adds it or
-  you spot a mistake.
+- **`UPDATING_COLLECTION.md`** — how to add a new Marvel Champions or
+  Arkham Horror LCG expansion, or fix a mis-matched/missing card, once
+  MarvelCDB/ArkhamDB adds it or you spot a mistake. Also covers the
+  multi-machine (images on one PC, Docker on another host) workflow and
+  a couple of hard-won pitfalls (silently-dropped non-jpg/png images,
+  a "ghost collection" trap after a failed `collection add`).
 - **`UPSTREAM_SYNC.md`** — how to pull in updates from the original
   `axmccx/proxynexus-rs` repo into the `proxynexus-rs/` fork here.
 - **`PACKAGING.md`** — how to re-package and send an updated version of
@@ -82,3 +86,35 @@ A companion Python script (kept outside this repo — see whichever
 `lcg-utils`-style location you keep it in) fuzzy-matches scanned card
 filenames against this catalog to produce the `{card_id}@{pack_id}.jpg`
 naming convention Proxy Nexus expects.
+
+## The Arkham Horror LCG adapter, briefly
+
+`proxynexus-rs/proxynexus-core/src/games/ahlcg/` implements Proxy
+Nexus's `GameAdapterInfo`/`CatalogProvider`/`DecklistProvider`/
+`CardBackProvider` traits against [ArkhamDB](https://arkhamdb.com)'s
+public API — the fullest of the two custom adapters in this fork.
+Notable, hard-won details baked into that code:
+
+- Fetches cards **per-pack**, not via the bulk `/api/public/cards/`
+  endpoint — confirmed the bulk endpoint is badly incomplete (1,983 cards
+  returned against packs.json's summed `total` of 8,422), worse than the
+  MarvelCDB bulk-endpoint bug that motivated the same workaround there.
+- Unlike MarvelCDB, ArkhamDB keeps **both sides of a double-sided card
+  under one `code`** (e.g. an investigator's front/back), with separate
+  `imagesrc`/`backimagesrc` fields rather than issuing the back its own
+  card entry. That maps directly onto Proxy Nexus's
+  `{card_id}@{pack_id}~back` image-part naming convention, so — unlike
+  the Marvel Champions adapter — no linked-card flattening is needed.
+- `DecklistProvider` (parses `arkhamdb.com/decklist/view/...` URLs) and
+  `CardBackProvider` (bundles official player/encounter card-back art
+  into MPC zip exports) are both implemented, going further than the
+  Marvel Champions adapter currently does (catalog only, for now).
+
+No fuzzy-matching script exists yet for sourcing Arkham Horror card
+images — files need to already follow the naming convention using
+ArkhamDB's card codes before `collection build`. One practical trap hit
+while first loading a real collection: source images pulled from
+scrapers/mod dumps often include `.webp` files, which `collection build`
+silently drops (only `.jpg`/`.jpeg`/`.png` are accepted) — see
+`UPDATING_COLLECTION.md`'s "Known pitfalls" section before your first
+`collection add`.
