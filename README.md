@@ -80,7 +80,15 @@ MarvelCDB's public API. Notable, hard-won details baked into that code:
   their own row in either listing endpoint otherwise.
 - Every MarvelCDB card `code` (including hidden sides) maps to its own
   independent `Card`/`CardVersion`, matching how MarvelCDB's own data
-  already treats them — no `~back` image-part logic needed.
+  already treats them — no `~back` image-part logic needed. Concretely:
+  Spider-Man/Peter Parker are `01001a`/`01001b`, two separate catalog
+  entries, each needing only its own plain front image
+  (`01001a@core.jpg`, `01001b@core.jpg`) — **never** `~back`. There's no
+  catalog entry for the bare code `01001`, so renaming these to
+  `01001@core.jpg` + `01001@core~back.jpg` (the Arkham Horror LCG
+  convention, see below) would silently fail to match any official
+  printing. See `UPDATING_COLLECTION.md`'s "Double-sided cards: two
+  different conventions" section.
 
 A companion Python script (kept outside this repo — see whichever
 `lcg-utils`-style location you keep it in) fuzzy-matches scanned card
@@ -112,9 +120,21 @@ Notable, hard-won details baked into that code:
 
 No fuzzy-matching script exists yet for sourcing Arkham Horror card
 images — files need to already follow the naming convention using
-ArkhamDB's card codes before `collection build`. One practical trap hit
-while first loading a real collection: source images pulled from
-scrapers/mod dumps often include `.webp` files, which `collection build`
-silently drops (only `.jpg`/`.jpeg`/`.png` are accepted) — see
-`UPDATING_COLLECTION.md`'s "Known pitfalls" section before your first
-`collection add`.
+ArkhamDB's card codes before `collection build`. Two practical traps hit
+while first loading a real collection, both covered in
+`UPDATING_COLLECTION.md`'s "Known pitfalls" section:
+
+- Source images pulled from scrapers/mod dumps often include `.webp`
+  files, which `collection build` silently drops (only
+  `.jpg`/`.jpeg`/`.png` are accepted).
+- A Tabletop Simulator save exporter (`lcg_tts_processor.py`, kept
+  outside this repo) had a bug where it wrote a `~back` file for
+  *every* card, not just genuinely double-sided ones — tagging
+  single-sided cards with a spurious copy of the generic
+  player/encounter card back. Fixed at the source (only write `~back`
+  when TTS's own `UniqueBack` flag is true), and cleaned up
+  retroactively in an already-exported collection by cross-referencing
+  each `~back` file's `(card_id, pack_id)` against ArkhamDB's
+  `double_sided` field rather than trusting image-hash deduplication
+  (the generic back isn't always byte-identical across scan batches, so
+  hashing alone under-counts the spurious files).
