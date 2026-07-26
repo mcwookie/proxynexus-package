@@ -59,7 +59,9 @@ Then open `http://<this-machine's-ip>:8050` in a browser.
 - **`SETUP.md`** — full setup walkthrough plus a troubleshooting section
   covering everything that came up building this the first time (MinIO
   CPU compatibility, stale exports, the localhost/IP trap, a gzip
-  filename mismatch in the init.sql loading path).
+  filename mismatch in the init.sql loading path, a missing
+  `.dockerignore` plus accumulated Docker build cache filling the host's
+  disk entirely).
 - **`UPDATING_COLLECTION.md`** — how to add a new Marvel Champions or
   Arkham Horror LCG expansion, or fix a mis-matched/missing card, once
   MarvelCDB/ArkhamDB adds it or you spot a mistake. Also covers the
@@ -123,23 +125,43 @@ Notable, hard-won details baked into that code:
   into MPC zip exports) are both implemented, going further than the
   Marvel Champions adapter currently does (catalog only, for now).
 
-No fuzzy-matching script exists yet for sourcing Arkham Horror card
-images — files need to already follow the naming convention using
-ArkhamDB's card codes before `collection build`. Two practical traps hit
-while first loading a real collection, both covered in
-`UPDATING_COLLECTION.md`'s "Known pitfalls" section:
+Unlike Marvel Champions, there's no fuzzy-matching script for scanned
+physical cards — instead, Arkham Horror card images are sourced from
+Tabletop Simulator mod data via `lcg_tts_processor.py` (kept outside
+this repo, in `lcg-utils/lcg-tts-processor/`), which extracts individual
+card images and identifies each one against ArkhamDB directly from a
+TTS save file (the [SCED](https://github.com/Chr1Z93/SCED) mod for
+player cards, [SCED-downloads](https://github.com/Chr1Z93/SCED-downloads)
+for encounter cards) rather than from a folder of scans. Its `--naming
+dbid` mode outputs directly in the `{card_id}@{pack_id}[~back].ext`
+convention `collection build` expects. Several practical traps hit while
+first loading real collections through it, all covered in
+`UPDATING_COLLECTION.md`'s "Known pitfalls" section and in more detail
+in that script's own `PROJECT_CONTEXT.md`:
 
 - Source images pulled from scrapers/mod dumps often include `.webp`
   files, which `collection build` silently drops (only
   `.jpg`/`.jpeg`/`.png` are accepted).
-- A Tabletop Simulator save exporter (`lcg_tts_processor.py`, kept
-  outside this repo) had a bug where it wrote a `~back` file for
-  *every* card, not just genuinely double-sided ones — tagging
-  single-sided cards with a spurious copy of the generic
-  player/encounter card back. Fixed at the source (only write `~back`
-  when TTS's own `UniqueBack` flag is true), and cleaned up
-  retroactively in an already-exported collection by cross-referencing
-  each `~back` file's `(card_id, pack_id)` against ArkhamDB's
-  `double_sided` field rather than trusting image-hash deduplication
+- The TTS exporter had a bug where it wrote a `~back` file for *every*
+  card, not just genuinely double-sided ones — tagging single-sided
+  cards with a spurious copy of the generic player/encounter card back.
+  Fixed at the source (only write `~back` when TTS's own `UniqueBack`
+  flag is true), and cleaned up retroactively in an already-exported
+  collection by cross-referencing each `~back` file's `(card_id,
+  pack_id)` against ArkhamDB's `double_sided` field rather than trusting
+  image-hash deduplication
   (the generic back isn't always byte-identical across scan batches, so
   hashing alone under-counts the spurious files).
+- Its ArkhamDB lookups switched from one bulk API call to per-pack
+  fetching, matching this repo's own `ahlcg` Rust adapter — needed for
+  consistency (images must resolve to the same `card_id`/`pack_id` the
+  Rust catalog uses), not because the bulk endpoint is actually
+  incomplete in the way originally assumed (see that script's
+  `PROJECT_CONTEXT.md` bug #9 for a self-correction of the original,
+  flawed justification).
+- Minicard/parallel-front-back variant images could silently win over
+  the real card purely by TTS save traversal-order luck (confirmed: 3 of
+  5 Core Set investigators exported with their minicard instead of the
+  real full-size card). Fixed by always preferring a directly-resolving
+  card id over one that only resolved via suffix-stripping, regardless
+  of encounter order.

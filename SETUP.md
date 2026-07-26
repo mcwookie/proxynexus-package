@@ -126,3 +126,28 @@ machine.
   files have the override (check `proxynexus-core/src/image_provider.rs`
   for `option_env!("PROXYNEXUS_COLLECTIONS_URL")`), then rebuild with
   `docker compose build web --no-cache`.
+- **`docker compose build web` fails with `no space left on device`**:
+  two compounding causes, confirmed on a real Docker host that hit this.
+  First, `docker-compose.yml`'s build context is the whole
+  `proxynexus-package/` directory (`context: .`) -- without a
+  `.dockerignore`, that includes `proxynexus-rs/target/` (an 11GB Rust
+  build cache Docker never needs, since it recompiles from scratch
+  inside the container), leftover `.pnx`/`.pdf`/`*_mpc.zip` test
+  artifacts (several GB), and all of `data/collections/` (multiple GB --
+  the `web` build doesn't even use it; `minio-init` mounts it directly
+  as a volume instead). A `.dockerignore` at the `proxynexus-package/`
+  root now excludes all of this. Second, and often the bigger one on a
+  host that's run `--no-cache` builds repeatedly: Docker's own build
+  cache accumulates indefinitely and is never cleaned up automatically
+  -- `--no-cache` skips *using* old cache for the build, it doesn't
+  delete it. Check both:
+  ```bash
+  df -h /                 # confirm root is actually full
+  docker system df -v     # "Build cache usage" line -- can easily reach 100GB+
+  ```
+  Fix the build cache with (safe -- only removes regenerable cache, not
+  running containers, images in use, or named volumes like
+  `proxynexus-package_minio-data`):
+  ```bash
+  docker builder prune -af
+  ```

@@ -50,6 +50,17 @@ container, so none of this is needed by the recipient:
 - `proxynexus-rs/.git/` — if present
 - `proxynexus-rs/*.pnx`, `*.pdf`, `*_mpc.zip` — leftover CLI test artifacts
 
+Note: a `.dockerignore` at the `proxynexus-package/` root excludes these
+same paths (plus `data/collections/`) from the `docker compose build`
+context too — but that's a separate mechanism for a separate problem
+(build context size/disk space on whoever runs `docker compose build`,
+confirmed to matter: without it, build context was 23GB+ and caused a
+real "no space left on device" failure — see `SETUP.md`). Keep excluding
+them here in the tar as well; `.dockerignore` doesn't shrink what you
+ship in the archive itself. `data/collections/` is deliberately **not**
+tar-excluded, unlike in `.dockerignore` — the recipient actually needs
+those images; the `web` build just doesn't.
+
 ## 4. Check the size before sending
 
 ```bash

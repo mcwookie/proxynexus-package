@@ -1,0 +1,16 @@
+# Docker rebuilds everything fresh inside its own container, so none of
+# this needs to be sent as build context. Without this file, `docker
+# compose build web` was sending the entire proxynexus-package/ directory
+# (23GB+) as context on every build -- confirmed the actual breakdown:
+# proxynexus-rs/target/ (11GB Rust build cache), leftover .pnx test
+# artifacts (5.6GB), and data/collections/ (6.7GB, which the `web` build
+# doesn't even use -- minio-init mounts it directly as a volume instead,
+# see docker-compose.yml). This is what caused a real "no space left on
+# device" build failure.
+proxynexus-rs/target/
+proxynexus-rs/*.pnx
+proxynexus-rs/*.pdf
+proxynexus-rs/*_mpc.zip
+proxynexus-rs/.git/
+data/collections/
+.git/
