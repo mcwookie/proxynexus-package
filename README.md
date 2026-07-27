@@ -201,3 +201,52 @@ browse alphabetically. Implemented as a GUI-layer-only change (a
 `SetSortMode` signal + a `use_memo` that re-sorts the already-fetched
 pack list) -- no new queries, no changes to `card_store.rs` beyond the
 tiebreak fix above.
+
+## Variant picker: two different cards sharing a title
+
+Reported symptom: for Marvel Champions' Vision set, the hero and
+alter-ego preview tiles both showed the wrong card, only one of the two
+could be swapped to the right art via the variant picker, and the
+"Apply to all 2 copies" button changed *both* tiles together even
+though they're supposed to be different cards. Confirmed real and not
+Vision-specific -- MarvelCDB has **7 different official cards** literally
+titled just "Vision" (an ally, the hero, its alter-ego, and 4 unrelated
+villain-form "leader" cards from a different pack).
+
+Root cause: the variant-picker pipeline (`get_available_printings`,
+`select_printing`, `apply_variant_overrides` in `proxynexus-core`, plus
+the GUI's `preview_grid.rs`/`main.rs`) matched and grouped candidate
+printings by **title** at several points, discarding the specific
+`card_id` each request actually carried. Title collisions across
+genuinely unrelated cards (not just hero/alter-ego pairs, which share a
+title precisely because the game doesn't give them distinct names) all
+funnel through the same bucket. Three fixes, all keeping the
+title-based *candidate list* intact (that's what legitimately lets a
+reprinted card -- e.g. Arkham Horror's Carolyn Fern, same design under a
+new official code in a later pack -- offer its other printings as
+swappable variants) while fixing everything that decides *which slot a
+chosen variant actually applies to*:
+
+- **`select_printing()`** (`card_store.rs`) didn't check a candidate's
+  `card_id` against the request's `id` at all -- purely sorted on
+  printing/collection preference, official-ness, and date. Two
+  candidates tied on all of those (as hero/alter-ego commonly are) fell
+  back to input order, meaning a request for one specific card could
+  silently resolve to a different card's printing. Fixed by prioritizing
+  an exact `card_id` match above every other sort key.
+- **`apply_variant_overrides()`** (`query.rs`) tracked occurrence counts
+  and both override maps (`global_overrides`, `index_overrides`) keyed
+  by normalized title. Fixed by keying both by `card_id` instead --
+  "Apply to all N copies" now only ever applies to actual copies of the
+  *same* card.
+- **GUI** (`preview_grid.rs`, `main.rs`) computed the click-to-open
+  variant-picker identity and the printings-by-title grouping the same
+  title-keyed way. Fixed to group/identify by `card_id`, deriving the
+  title only where it's still needed -- looking up the (intentionally
+  title-based) candidate list to show in the picker.
+
+Verified with two new regression tests (`card_store.rs`,
+`query.rs`) that construct two printings sharing an identical title but
+different `card_id`s -- both fail without these fixes and pass with
+them -- plus confirmed the full existing test suite (48 tests) still
+passes.
