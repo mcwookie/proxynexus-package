@@ -96,6 +96,15 @@ MarvelCDB's public API. Notable, hard-won details baked into that code:
   convention, see below) would silently fail to match any official
   printing. See `UPDATING_COLLECTION.md`'s "Double-sided cards: two
   different conventions" section.
+- `McdbPack`'s release-date field was named `date_release`, but
+  MarvelCDB's actual JSON key is `available` — every pack silently
+  deserialized to `None` for as long as this adapter existed, making the
+  Set dropdown's date-based sort a complete no-op for this game (order
+  was pure `HashMap` chance, not date-related at all). Fixed by renaming
+  the field to match; verified against a live catalog sync that Core
+  Set/Captain America/Hercules now get real dates
+  (`2019-11-01`/`2019-12-20`/`2026-02-20`). See "Set list sort order"
+  below.
 
 A companion Python script (kept outside this repo — see whichever
 `lcg-utils`-style location you keep it in) fuzzy-matches scanned card
@@ -165,3 +174,30 @@ in that script's own `PROJECT_CONTEXT.md`:
   real full-size card). Fixed by always preferring a directly-resolving
   card id over one that only resolved via suffix-stripping, regardless
   of encounter order.
+
+## Set list sort order
+
+The web app's Set dropdown (`proxynexus-gui/src/components/source_selector.rs`)
+is sorted by pack release date, newest first, via
+`CardStore::get_available_packs()` in `proxynexus-core/src/card_store.rs`.
+Two real bugs found while investigating "the list looks unsorted":
+
+- **Packs sharing the same release date had no tiebreak** -- they were
+  collected into a `HashMap` before sorting, and Rust's `HashMap`
+  iteration order is randomized per-process, so tied packs could appear
+  in a different relative order every time the app restarted. This is
+  common: e.g. two separate waves of 5 investigator starter decks each
+  released entirely on the same day. Fixed by adding pack name as a
+  secondary sort key (`(date_release, name)` instead of `date_release`
+  alone), which is fully deterministic regardless of `HashMap` order.
+- **Marvel Champions had no working date signal at all** -- see the
+  `McdbPack`/`date_release` field-name bug noted in the Marvel Champions
+  section above. Its entire Set list order was pure `HashMap` chance
+  until that was fixed, not merely mis-ordered on ties.
+
+Also added: a "Release date" / "Alphabetical" radio-button toggle above
+the Set dropdown, so users aren't stuck with date order if they'd rather
+browse alphabetically. Implemented as a GUI-layer-only change (a
+`SetSortMode` signal + a `use_memo` that re-sorts the already-fetched
+pack list) -- no new queries, no changes to `card_store.rs` beyond the
+tiebreak fix above.
