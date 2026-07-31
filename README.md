@@ -250,3 +250,69 @@ Verified with two new regression tests (`card_store.rs`,
 different `card_id`s -- both fail without these fixes and pass with
 them -- plus confirmed the full existing test suite (48 tests) still
 passes.
+
+## Card back manifest: which generic back does each card need?
+
+Motivation: most cards' generic card back (when proxying without the
+official back art) follows their distribution -- a card from an
+encounter set needs the encounter back, a card from a player pack needs
+the player back. But that heuristic breaks for specific, real cards:
+
+- **Arkham Horror**: some cards are physically included in a player
+  investigator pack (e.g. a signature weakness like "Curse of the
+  Rougarou," or a scenario's "Dragged Under" treachery bundled into a
+  Definitive Edition-style pack) but are mechanically encounter cards
+  that get shuffled into the encounter deck, not the player's deck --
+  they need the **encounter** back despite their distribution.
+- **Marvel Champions**: some cards are bundled into a hero's own player
+  pack (e.g. Ms. Marvel's "Home by Dawn" Obligation card, and each hero
+  pack's nemesis villain/scheme set) but are mechanically encounter-side
+  cards -- same mismatch, inverted.
+
+Distribution (which pack/collection a card ships in) is therefore the
+wrong signal. The right one is each card's own **type** --
+ArkhamDB/MarvelCDB's `type_code` field (`investigator`/`asset`/`event`
+vs. `enemy`/`treachery`/`agenda`, `hero`/`ally`/`upgrade` vs.
+`villain`/`obligation`/`main_scheme`, etc.) -- which both APIs report
+per-card regardless of which pack that printing shipped in.
+
+Implementation: each adapter now classifies `type_code` into a
+`back_type` of `"player"`, `"encounter"`, or `None` (unclassified) via a
+`PLAYER_TYPES`/`ENCOUNTER_TYPES` list and a `back_type_for()` helper --
+see `games/ahlcg/adapter.rs` and `games/marvel_champions/adapter.rs`.
+That flows through `Card` (catalog) → `AvailablePrintingRow` →
+`Printing` (`back_type: Option<String>` on each, with a
+`cards.back_type` DB column added via an idempotent `ALTER TABLE`
+migration in `db_storage.rs`), so it's available anywhere a `Printing`
+is -- including generation.
+
+`proxynexus-cli generate pdf`/`generate mpc` now also write a
+`<output>_manifest.csv` and `<output>_manifest.json` alongside the PDF/
+ZIP (`proxynexus-core/src/manifest.rs`, wired into `main.rs`'s
+`handle_generate`), listing every included printing's `card_id`,
+`card_title`, `collection`, `pack_id`, `variant`, `side`, `back_type`,
+`is_official`, and `date_release` -- so you can look up, per card,
+whether it needs a player or encounter back when physically printing.
+The web/desktop GUI's PDF/MPC export (`proxynexus-gui/src/export.rs`)
+does the same -- generating a PDF or MPC ZIP now also triggers two
+extra downloads (native: two extra save-file dialogs),
+`proxynexus_export_manifest.csv` and `.json`, built from the same
+`manifest.rs` helpers against the exact printings that went into that
+export.
+
+Only Arkham Horror and Marvel Champions classify `back_type` today; the
+other adapters (Netrunner, L5R, AGOT, LotR LCG) set it to `None` for
+every card -- their proxy pipelines don't currently need this
+distinction, and LotR LCG's RingsDB API doesn't expose encounter-side
+cards at all (`encounter=1` has no effect), so it couldn't be classified
+this way even if wanted later.
+
+**If you already have a catalog synced from before this feature**,
+`back_type` will read as empty/`null` in the manifest until you run
+`catalog update` again -- the classification happens at catalog-sync
+time from live API data, not retroactively from the existing DB.
+Verified live: `catalog update` for `ahlcg` correctly classified "Curse
+of the Rougarou" and "Dragged Under" as `encounter` and "Lady Esprit"/
+"Bear Trap"/"Fishing Net" as `player`; for `marvel_champions`, Ms.
+Marvel's "Home by Dawn" plus her nemesis set correctly came back
+`encounter` while the rest of her hero pack came back `player`.
