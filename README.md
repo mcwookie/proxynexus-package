@@ -316,3 +316,62 @@ of the Rougarou" and "Dragged Under" as `encounter` and "Lady Esprit"/
 "Bear Trap"/"Fishing Net" as `player`; for `marvel_champions`, Ms.
 Marvel's "Home by Dawn" plus her nemesis set correctly came back
 `encounter` while the rest of her hero pack came back `player`.
+
+### Cards whose back is a mechanically different card
+
+`back_type` above answers "does this card's front use the player or
+encounter generic back" -- but a card can be genuinely double-sided in
+two different ways, and only one of them means the back is really just
+the same identity's flip side:
+
+- **Same identity, both sides the same generic-back category** (most
+  investigators, acts, agendas): ArkhamDB/MarvelCDB represent this as
+  one card with `double_sided: true` (ArkhamDB) or already flatten it
+  into two independent catalog entries (MarvelCDB's hero/alter-ego
+  pairs). `back_type` staying based on the front alone is correct here
+  -- both sides are the same player/encounter identity anyway.
+- **A genuinely different card on the back** -- e.g. Arkham Horror's
+  Carl Sanford ("The Midwinter Gala"), an `asset`/player card up front
+  that flips into an `enemy`/encounter card (ArkhamDB code `71034b`) on
+  the back. Reported by a user: the manifest showed `back_type=player`
+  for this card with no indication its back needed an encounter back
+  instead. Root cause: ArkhamDB represents this via a *different*
+  mechanism than `double_sided` -- `linked_to_code`/`linked_card`, a
+  mechanically distinct card ArkhamDB never lists as its own top-level
+  entry in any pack listing (confirmed empirically), only nested inside
+  the front card's data.
+
+Verified via a live scan of all 113 ArkhamDB packs: **464 cards** carry
+`linked_to_code`, of which **52** have a front/back that classify to a
+*different* `back_type` (like Carl Sanford) -- spread across many sets,
+not just Midwinter Gala (Path to Carcosa, Feast of Hemlock Vale, The
+Scarlet Keys, Machinations Through Time, and others). Also checked
+MarvelCDB the same way (all 60 packs, 324 `linked_card` cards, 14
+classify differently) -- but Marvel Champions doesn't need this fix at
+all, because its adapter already fully flattens every `linked_card`
+into its own independent catalog entry (see "The Marvel Champions
+adapter, briefly" above), so each side already gets its own correctly
+classified `back_type` today. Zero 3-level linked-card chains found in
+either game's data, so MC's flattening isn't missing anything deeper.
+
+**Deliberately does not change `back_type` for anything** -- an earlier
+version of this fix considered making `back_type` `None` for any
+`double_sided` card (investigators included), but that's wrong: those
+cards still need to show which generic back they'd need, `double_sided`
+or not. Instead, three new fields are purely additive, populated only
+when ArkhamDB's `linked_to_code` is present: `linked_card_code`,
+`linked_card_name`, and `linked_card_back_type` (the linked card's own
+`back_type`, computed the same way). For Carl Sanford:
+`back_type=player` (unchanged) plus `linked_card_code=71034b`,
+`linked_card_name=Carl Sanford`, `linked_card_back_type=encounter` --
+so the CSV directly shows the mismatch. For the other 412 linked cards
+where both sides happen to classify the same, the same fields still
+populate (just don't disagree) -- still useful, since it surfaces the
+card has a second identity at all.
+
+Threaded through the same chain as `back_type`
+(`games/ahlcg/models.rs`'s `AhdbCard::linked_to_code`/`linked_card` →
+`games/ahlcg/adapter.rs` → `catalog::Card` → three more `cards` columns
+via another idempotent `ALTER TABLE` migration → `AvailablePrintingRow`
+→ `Printing` → `manifest::ManifestEntry`/CSV/JSON). Only populated by
+the `ahlcg` adapter; every other adapter sets all three to `None`.
