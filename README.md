@@ -375,3 +375,72 @@ Threaded through the same chain as `back_type`
 via another idempotent `ALTER TABLE` migration → `AvailablePrintingRow`
 → `Printing` → `manifest::ManifestEntry`/CSV/JSON). Only populated by
 the `ahlcg` adapter; every other adapter sets all three to `None`.
+
+## mpc-autofill order XML
+
+`generate mpc` (CLI and GUI) now also writes a companion
+`<output>_mpc_autofill.xml` alongside the ZIP -- an order file for
+[mpc-autofill](https://github.com/chilli-axe/mpc-autofill) (the
+`chilli-axe/mpc-autofill` desktop tool, not to be confused with
+MakePlayingCards' own website), which reads it to automatically fill an
+entire print order -- front/back placement, cardstock, and foil --
+without manually dragging images into MPC's uploader. Workflow: unzip
+the MPC ZIP into a folder, drop `order.xml` (renamed from
+`<output>_mpc_autofill.xml`, or just point `--directory` at it) into
+that same folder, run the desktop tool there.
+
+Schema verified directly against the tool's actual source
+(`chilli-axe/mpc-autofill`'s `desktop-tool/src/order.py`/`constants.py`
+and its own `tests/test_order.xml` fixture), not guessed:
+
+*   `<details><quantity>`/`<stock>`/`<foil></details>` -- order-level,
+    not per-card. `<stock>` must be one of exactly 5 strings (ArkhamDB
+    doesn't drive this -- it's a personal print preference); mapped from
+    a new `Cardstock` enum in `mpc.rs`
+    (`S27`/`S30`/`S33`/`M31`/`P10`) via a `generate mpc --stock`
+    CLI flag (`s27`/`s30`/`s33`/`m31`/`p10`, default `s33`) and
+    `--foil` (default off). The GUI has no picker for this yet -- always
+    emits `(S33) Superior Smooth`, non-foil, matching the CLI's default.
+*   `<fronts>`/`<backs>` each list `<card>` elements with `<id>` (a
+    local file path -- confirmed the tool's `CardImage.generate_file_path`
+    treats `<id>` as local automatically once it resolves to a real file
+    on disk, so plain relative paths work, no Google Drive account
+    needed), `<sourceType>Local File</sourceType>`, and `<slots>`
+    (0-indexed).
+*   `<cardback>` is a single order-wide fallback for any slot *not*
+    covered by `<backs>` -- **deliberately not relied on for anything**
+    here. A mixed print job needs different generic backs on different
+    cards (a player card needs the player back, an encounter card needs
+    the encounter back), which one fallback image can't express. Instead
+    every single card gets its own explicit `<backs>` entry: its real
+    extracted `~back` art if it has one (e.g. Carl Sanford gets his own
+    back, not a generic one -- see "Cards whose back is a mechanically
+    different card" above), otherwise the correct generic player/
+    encounter back chosen via that card's own `back_type` (matched by
+    substring against the bundled `CardBackProvider` filenames, e.g.
+    `ahlcg_player_back.png`). `<cardback>` is only ever consulted for a
+    card with no real back art *and* an unclassified `back_type` --
+    rare, and any such card is easy to spot and fix by eye in the MPC
+    print preview since it'll be visibly wrong.
+*   No card-size field exists in the schema at all -- confirmed the
+    desktop tool's `MakePlayingCards` target always starts at
+    `design/custom-blank-card.html`, which is MakePlayingCards' "Custom
+    Game Cards (63 x 88mm)" product -- exactly the product this whole
+    pipeline already assumes, so there's nothing to configure here.
+    "Card finishing"/"Packaging" (e.g. shrink-wrap) are checkout-level
+    choices outside the schema and outside what the desktop tool
+    automates at all -- stay manual steps regardless.
+
+Implementation: `generate_mpc_zip` now returns an `MpcZipOutput { zip_bytes,
+autofill_slots }` instead of a bare `Vec<u8>` -- `autofill_slots` is built
+from a `WrittenImage` record pushed for every file actually written into
+the zip (so the XML's paths are guaranteed to exactly match what's really
+in the ZIP -- extension included, which isn't knowable ahead of the
+image-processing pass since it depends on runtime format detection, not
+just the source filename). `build_autofill_slots()` groups those by
+physical card copy and resolves each one's back (real part, generic
+match, or `None`); `generate_mpc_autofill_xml()` serializes the result.
+Verified against a real generation run (Midwinter Gala, 78 cards): parsed
+cleanly with Python's `ElementTree`, front slots exactly covered `0..77`
+with no gaps, and every single path the XML references was cross-checked
+to actually exist in the generated ZIP.
