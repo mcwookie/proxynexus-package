@@ -83,19 +83,26 @@ MarvelCDB's public API. Notable, hard-won details baked into that code:
   endpoint — the bulk endpoint silently drops some encounter cards.
 - Flattens each card's embedded `linked_card` data (MarvelCDB's
   representation of hidden double-sided cards, like a hero's alter-ego
-  side) into its own catalog entry — those hidden cards never appear as
-  their own row in either listing endpoint otherwise.
-- Every MarvelCDB card `code` (including hidden sides) maps to its own
-  independent `Card`/`CardVersion`, matching how MarvelCDB's own data
-  already treats them — no `~back` image-part logic needed. Concretely:
-  Spider-Man/Peter Parker are `01001a`/`01001b`, two separate catalog
-  entries, each needing only its own plain front image
-  (`01001a@core.jpg`, `01001b@core.jpg`) — **never** `~back`. There's no
-  catalog entry for the bare code `01001`, so renaming these to
-  `01001@core.jpg` + `01001@core~back.jpg` (the Arkham Horror LCG
-  convention, see below) would silently fail to match any official
-  printing. See `UPDATING_COLLECTION.md`'s "Double-sided cards: two
-  different conventions" section.
+  side) out of the raw per-pack API response during fetch, extracting
+  both sides as separate `McdbCard` rows (`hidden`/`back_link` set
+  accordingly) — those hidden cards never appear as their own row in
+  either listing endpoint otherwise.
+- **The hidden side does NOT get its own `Card`/`CardVersion`.**
+  Concretely: Spider-Man/Peter Parker are `01001a`/`01001b` in
+  MarvelCDB's own data, but only `01001a` is a real catalog entry —
+  `01001a` needs both a front (`01001a@core.jpg`) *and* a back
+  (`01001a@core~back.jpg`, Peter Parker's art), the same `~back`
+  convention as Arkham Horror LCG below, and there's no catalog entry
+  for `01001b` at all. **This was gotten wrong for a long time**: an
+  earlier version of this adapter (and this doc) treated every code,
+  hidden or not, as its own independent front-only card — confirmed via
+  MarvelCDB's own `double_sided: false` flag on both sides, which reads
+  exactly like "these are two different cards" but isn't a reliable
+  signal for physical print layout at all. The real rules: a hero's
+  Hero/Alter-Ego forms are one physical card players flip during play,
+  exactly like an ArkhamDB investigator. See "Marvel Champions
+  hero/alter-ego: one physical card, not two" below for the full
+  correction and how it was verified.
 - `McdbPack`'s release-date field was named `date_release`, but
   MarvelCDB's actual JSON key is `available` — every pack silently
   deserialized to `None` for as long as this adapter existed, making the
@@ -373,12 +380,16 @@ Verified via a live scan of all 113 ArkhamDB packs: **464 cards** carry
 not just Midwinter Gala (Path to Carcosa, Feast of Hemlock Vale, The
 Scarlet Keys, Machinations Through Time, and others). Also checked
 MarvelCDB the same way (all 60 packs, 324 `linked_card` cards, 14
-classify differently) -- but Marvel Champions doesn't need this fix at
-all, because its adapter already fully flattens every `linked_card`
-into its own independent catalog entry (see "The Marvel Champions
-adapter, briefly" above), so each side already gets its own correctly
-classified `back_type` today. Zero 3-level linked-card chains found in
-either game's data, so MC's flattening isn't missing anything deeper.
+classify differently). Zero 3-level linked-card chains found in either
+game's data.
+
+**Marvel Champions' `linked_card` pairs turned out to need a different
+fix than this one, not none at all** -- see "Marvel Champions
+hero/alter-ego: one physical card, not two" below. An earlier version
+of this doc claimed MC's adapter "already fully flattens every
+`linked_card` into its own independent catalog entry" and needed no
+fix; that was true of the *code* but wrong about whether that behavior
+was actually correct -- it wasn't.
 
 **Deliberately does not change `back_type` for anything** -- an earlier
 version of this fix considered making `back_type` `None` for any
@@ -401,6 +412,61 @@ Threaded through the same chain as `back_type`
 via another idempotent `ALTER TABLE` migration → `AvailablePrintingRow`
 → `Printing` → `manifest::ManifestEntry`/CSV/JSON). Only populated by
 the `ahlcg` adapter; every other adapter sets all three to `None`.
+
+### Marvel Champions hero/alter-ego: one physical card, not two
+
+A hero's Hero and Alter-Ego sides (e.g. Vision, `26001a`/`26001b`) were
+being cataloged as two entirely separate, independently-printable
+cards, each falling back to the generic player back when no image
+existed for it. Initially asserted (confidently, twice) that this was
+*correct* -- MarvelCDB reports `double_sided: false` on both sides and
+gives each its own `code`/`imagesrc`, which reads exactly like "two
+different cards." That assertion was wrong; corrected after user
+pushback plus a web search confirming the actual rules: "to change from
+hero to alter-ego... the player... flips their identity card to its
+other side" -- a single physical double-sided card, exactly like an
+ArkhamDB investigator's front/back, not two cards. MarvelCDB's
+`double_sided` flag doesn't describe physical print layout the way
+ArkhamDB's does; it isn't a reliable signal for this at all.
+
+The reliable signal was already sitting unused in `McdbCard`:
+`hidden` (true for the non-primary/Alter-Ego side) and `back_link`
+(points to the other side's code). `adapter.rs`'s `fetch_catalog()`
+was pushing a `Card`/`CardVersion` for *every* code regardless,
+including hidden ones, with `linked_card_code`/`name`/`back_type`
+hardcoded to `None` -- i.e. the exact opposite of how `ahlcg` already
+treats its own `linked_to_code` pairs (see above). Verified live before
+trusting the fix needed to be broad: **69 hero cards** across the whole
+MarvelCDB catalog carry a `back_link` (every hero, not a handful).
+
+Fixed in `games/marvel_champions/adapter.rs`: a card with `hidden ==
+Some(true)` is now skipped entirely -- no independent `Card`/
+`CardVersion`, so it can't show up in search or be generated as its own
+printing -- and folded into its visible counterpart's
+`linked_card_code`/`linked_card_name`/`linked_card_back_type` instead,
+mirroring `ahlcg`'s pattern exactly. `back_type` itself is unchanged
+(a hero's own `back_type` still correctly falls back to the generic
+player back when no real `~back` image exists in the collection --
+that fallback behavior was never the bug). Covered by three new unit
+tests (`build_cards_and_versions` extracted as a pure, synchronously
+testable function): the hidden side gets no independent catalog entry,
+the visible side carries the right `linked_card_*` metadata, and an
+ordinary card with no `back_link` is unaffected.
+
+The image side needed a matching fix -- `rename_marvel_champions.py`
+(a separate `lcg-utils` tool that turns scanned card images into a
+Proxy Nexus collection; see its own `rename_marvel_champions.md` for
+the full writeup) previously had no way to produce a `~back` file at
+all, only ever writing `{card_id}@{pack_id}.{ext}`. A collection built
+before this fix has
+`26001a@vision.jpg` *and* `26001b@vision.jpg` as two front-only files;
+after re-running the updated script against the original scans, it's
+`26001a@vision.jpg` (Hero) + `26001a@vision~back.jpg` (Alter-Ego), with
+no `26001b@vision.*` at all. **If you have an existing Marvel Champions
+collection from before this fix**, `catalog update` alone isn't enough
+-- the images themselves need to be regenerated (re-run the renamer
+against your original source scans) and the collection rebuilt/re-added,
+the same as the catalog does.
 
 ## mpc-autofill order XML
 
