@@ -317,6 +317,32 @@ of the Rougarou" and "Dragged Under" as `encounter` and "Lady Esprit"/
 Marvel's "Home by Dawn" plus her nemesis set correctly came back
 `encounter` while the rest of her hero pack came back `player`.
 
+### AHLCG weaknesses: `type_code` alone is wrong for these
+
+A second, sharper exception to the `type_code`-based rule above: basic
+and signature weaknesses (e.g. Mob Goons, ArkhamDB code `08003`) always
+print with the **player** back, even when their `type_code` is
+`enemy`/`treachery` -- which would otherwise classify as `encounter`
+under `PLAYER_TYPES`/`ENCOUNTER_TYPES` alone. Initially asserted (twice,
+incorrectly) that ArkhamDB's `type_code`/Rules Reference "encounter
+cardtype" language meant these needed the encounter back; corrected
+after user pushback citing a physical card observation and a community
+TTS mod's card-back catalog showing Mob Goons using the identical
+`BackURL`/`"PlayerCard"` tag as ordinary player cards. The `type_code`
+still correctly governs how the card *resolves* once drawn (an
+"encounter cardtype" card per the Rules Reference -- not controlled by
+any player) -- that's a different axis from which card back it's
+physically printed with: the card is drawn from, and shuffled back
+into, the investigator's own deck, so it has to carry that deck's back
+regardless of how it plays.
+
+Implementation: `AhdbCard` gained a `subtype_code` field (ArkhamDB's own
+field, `"weakness"`/`"basicweakness"`/absent) -- confirmed via a live
+core-set survey to appear only on weakness cards, spanning multiple
+`type_code`s (treachery, enemy, event, asset). `back_type_for()` checks
+`subtype_code` first and forces `"player"` when set, before falling
+through to the normal `type_code`-based classification.
+
 ### Cards whose back is a mechanically different card
 
 `back_type` above answers "does this card's front use the player or
