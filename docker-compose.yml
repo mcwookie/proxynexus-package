@@ -38,6 +38,16 @@ services:
       "
 
   web:
+    # CI (.github/workflows/docker-build.yml in this repo) builds and
+    # pushes this on every push to master, so `docker compose pull web`
+    # fetches exactly what CI already validated -- no local Rust/wasm
+    # toolchain needed on the Docker host. `build:` is kept alongside it
+    # as a fallback: `docker compose build web` still works exactly as
+    # before, for testing an uncommitted local change before pushing.
+    # The package is private (it bakes in PROXYNEXUS_COLLECTIONS_URL,
+    # your LAN address) -- `docker login ghcr.io` once on this host with
+    # a token that has `read:packages` scope before the first pull.
+    image: ghcr.io/mcwookie/proxynexus-package:latest
     build:
       context: .
       dockerfile: Dockerfile.web
