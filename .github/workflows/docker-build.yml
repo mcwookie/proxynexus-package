@@ -1,0 +1,72 @@
+name: Build and push web image
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch: {}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout proxynexus-package
+        uses: actions/checkout@v5
+
+      # proxynexus-rs is its own separate fork (own history, own
+      # upstream remote -- see UPSTREAM_SYNC.md), not a git submodule of
+      # this repo. Dockerfile.web expects it as a plain directory at
+      # ./proxynexus-rs, same layout as the local dev setup -- it's
+      # .gitignore'd here specifically so this repo never touches its
+      # history.
+      - name: Checkout proxynexus-rs
+        uses: actions/checkout@v5
+        with:
+          repository: mcwookie/proxynexus-rs
+          path: proxynexus-rs
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      # PROXYNEXUS_COLLECTIONS_URL gets baked into the compiled WASM at
+      # build time (see Dockerfile.web) -- must be set as a repo secret
+      # (Settings -> Secrets and variables -> Actions) with the same
+      # value as your local .env's PROXYNEXUS_COLLECTIONS_URL before this
+      # workflow will produce a working image. Not a credential, but kept
+      # as a secret rather than a plain variable since it reveals your
+      # docker host's LAN address.
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.web
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PROXYNEXUS_COLLECTIONS_URL=${{ secrets.PROXYNEXUS_COLLECTIONS_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
