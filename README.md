@@ -38,6 +38,19 @@ docker compose up -d --build
 
 Then open `http://<this-machine's-ip>:8050` in a browser.
 
+**After the first setup**, CI (`.github/workflows/docker-build.yml`)
+builds and pushes a fresh `web` image to GHCR on every push to this
+repo's `master`, so redeploying a later update is just:
+```bash
+docker compose pull web && docker compose up -d
+```
+No local Rust/wasm toolchain needed for that path — `docker compose
+build web` (as above) still works too, for testing an uncommitted local
+change before pushing. `ghcr.io/mcwookie/proxynexus-package` is private
+(it bakes in `PROXYNEXUS_COLLECTIONS_URL`, this deployment's LAN
+address), so `docker login ghcr.io` once with a token that has
+`read:packages` scope before the first pull.
+
 ## What's actually running
 
 - **MinIO** — a self-hosted, S3-compatible object store standing in for

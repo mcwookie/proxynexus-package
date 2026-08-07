@@ -1,5 +1,13 @@
 # Proxy Nexus — self-hosted web app package
 
+This doc covers packaging a **fully standalone copy for a friend** who
+has no access to your private GitHub repos/GHCR package — everything
+here builds from source locally, deliberately not touching CI or the
+registry at all. If you're redeploying to **your own** Docker host
+instead, see the main `README.md`'s Quick Start — CI already builds and
+pushes an image for that case, so it's just `docker compose pull web &&
+docker compose up -d`, no local build needed.
+
 ## Folder layout this expects
 
 ```
