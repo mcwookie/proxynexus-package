@@ -5,6 +5,11 @@ on:
     branches: [master]
     paths-ignore:
       - "**.md"
+  # Sent by proxynexus-rs's notify-package.yml on every master push there,
+  # so a code change in that (separate, .gitignore'd) repo republishes the
+  # image without a manual dispatch.
+  repository_dispatch:
+    types: [proxynexus-rs-updated]
   workflow_dispatch: {}
 
 env:
