@@ -1,6 +1,9 @@
 services:
+  # MinIO pulled minio/minio and minio/mc off Docker Hub entirely (both
+  # repos 404 there now, not just old tags) and publishes to Quay.io
+  # instead -- same tags, just a different registry host.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
     container_name: proxynexus-minio
     command: server /data --console-address ":9001"
     environment:
@@ -23,7 +26,7 @@ services:
   # compose up` and exits when done -- that's expected, and safe to
   # re-run (mc mirror --overwrite only touches what's actually changed).
   minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
     depends_on:
       minio:
         condition: service_healthy
