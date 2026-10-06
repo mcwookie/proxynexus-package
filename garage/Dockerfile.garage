@@ -1,0 +1,12 @@
+# The official garage image has no shell (distroless-style) and can't run
+# garage-entrypoint.sh directly -- confirmed via a real "exec: /bin/sh: no
+# such file or directory" failure. Pulling in just the static binary onto
+# a base that actually has a shell fixes that.
+FROM dxflrs/garage:v2.1.0 AS garage-bin
+
+FROM alpine:3.20
+COPY --from=garage-bin /garage /garage
+COPY garage.toml.template /etc/garage.toml.template
+COPY garage-entrypoint.sh /garage-entrypoint.sh
+RUN chmod +x /garage-entrypoint.sh
+ENTRYPOINT ["/garage-entrypoint.sh"]

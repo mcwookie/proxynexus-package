@@ -1,42 +1,56 @@
 services:
-  # MinIO pulled minio/minio and minio/mc off Docker Hub entirely (both
-  # repos 404 there now, not just old tags) and publishes to Quay.io
-  # instead -- same tags, just a different registry host.
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z-cpuv1
-    container_name: proxynexus-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: proxynexus
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    ports:
-      - "9000:9000"   # S3 API -- this is what the web app fetches images from
-      - "9001:9001"   # Web console (browse the bucket, optional)
+  # Replaced MinIO entirely: quay.io/minio/minio and quay.io/minio/mc were
+  # discontinued and deleted (Docker Hub Sep 11 2026, Quay Sep 24 2026) as
+  # part of a commercial rebrand to "AIStor". The replacement path
+  # (quay.io/minio/aistor/*) does pull anonymously, but confirmed by
+  # actually running it: it requires a paid license to serve any S3
+  # traffic at all ("All S3 operations are denied" without one), and
+  # dropped the cpuv1 build variant this host's CPU needs ("Fatal glibc
+  # error: CPU does not support x86-64-v2"). Garage has neither problem --
+  # AGPLv3, no license gate, ordinary x86-64 baseline build.
+  #
+  # Built locally (see garage/Dockerfile.garage) rather than pulled,
+  # because the official image has no shell to run the bootstrap script
+  # in (confirmed: "exec: /bin/sh: no such file or directory").
+  # garage-entrypoint.sh creates the cluster layout, bucket, and access
+  # key on first run, then hands the key to garage-init below via the
+  # shared `garage-creds` volume. Safe to re-run on every `docker compose
+  # up` -- every step checks current state first (verified by hand: fresh
+  # start, then restart against existing data, no errors either time).
+  garage:
+    build:
+      context: ./garage
+      dockerfile: Dockerfile.garage
+    container_name: proxynexus-garage
     volumes:
-      - minio-data:/data
+      - garage-data:/data
+      - garage-creds:/shared
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # Gates garage-init below: that file only exists once bootstrap
+      # (layout + bucket + key) has actually finished.
+      test: ["CMD", "test", "-f", "/shared/garage-credentials.env"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 20
 
-  # One-shot init: creates the bucket, makes it publicly readable (the web
-  # app's <img src> tags fetch anonymously), and mirrors in the bundled
-  # collection images from ./data/collections. Runs on every `docker
-  # compose up` and exits when done -- that's expected, and safe to
-  # re-run (mc mirror --overwrite only touches what's actually changed).
-  minio-init:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z-cpuv1
+  # One-shot init: mirrors in the bundled collection images from
+  # ./data/collections, using the key garage-entrypoint.sh generated.
+  # Runs on every `docker compose up` and exits when done -- that's
+  # expected, and safe to re-run (mc mirror --overwrite only touches
+  # what's actually changed). Public read access is already configured by
+  # garage-entrypoint.sh's `bucket website --allow`, not here.
+  garage-init:
+    image: quay.io/minio/aistor/mc:RELEASE.2026-09-19T15-24-59Z
     depends_on:
-      minio:
+      garage:
         condition: service_healthy
     volumes:
       - ./data/collections:/collections:ro
+      - garage-creds:/shared:ro
     entrypoint: >
       /bin/sh -c "
-      mc alias set local http://minio:9000 proxynexus ${MINIO_ROOT_PASSWORD} &&
-      mc mb --ignore-existing local/proxynexus-collections &&
-      mc anonymous set download local/proxynexus-collections &&
+      . /shared/garage-credentials.env &&
+      mc alias set local http://garage:3900 $$GARAGE_KEY_ID $$GARAGE_SECRET &&
       mc mirror --overwrite /collections local/proxynexus-collections
       "
 
@@ -55,20 +69,23 @@ services:
       context: .
       dockerfile: Dockerfile.web
       args:
-        # Set in .env -- must be the Docker host's real LAN IP or hostname,
-        # not "localhost", unless you'll only ever browse from the Docker
-        # host itself. This gets baked into the compiled WASM at build
-        # time, so "localhost" would resolve to whatever machine the
-        # browser itself runs on, not the Docker host.
+        # Set in .env -- must be the Docker host's real LAN IP or hostname
+        # (not "localhost", unless you'll only ever browse from the Docker
+        # host itself) and the /collections path nginx-web.conf proxies to
+        # Garage, e.g. http://192.168.1.50:8050/collections. This gets
+        # baked into the compiled WASM at build time, so "localhost" would
+        # resolve to whatever machine the browser itself runs on, not the
+        # Docker host.
         PROXYNEXUS_COLLECTIONS_URL: ${PROXYNEXUS_COLLECTIONS_URL}
     container_name: proxynexus-web
     ports:
       - "8050:80"
     depends_on:
-      - minio-init
+      - garage-init
 
 volumes:
-  minio-data:
+  garage-data:
+  garage-creds:
 
 networks:
   default:

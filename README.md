@@ -29,9 +29,9 @@ git-ignored by this outer repo — the two don't interact.
 
 ```bash
 cp .env.example .env
-# edit .env: set a real MINIO_ROOT_PASSWORD, and set PROXYNEXUS_COLLECTIONS_URL
-# to this machine's real LAN IP/hostname (not "localhost", unless you'll
-# only ever browse from this same machine)
+# edit .env: set PROXYNEXUS_COLLECTIONS_URL to this machine's real LAN
+# IP/hostname (not "localhost", unless you'll only ever browse from this
+# same machine) plus the /collections path, e.g. http://192.168.1.50:8050/collections
 
 docker compose up -d --build
 ```
@@ -53,9 +53,15 @@ address), so `docker login ghcr.io` once with a token that has
 
 ## What's actually running
 
-- **MinIO** — a self-hosted, S3-compatible object store standing in for
+- **Garage** — a self-hosted, S3-compatible object store standing in for
   the original project's Cloudflare R2 bucket, which this fork doesn't
-  have credentials for. Serves card images to the web app.
+  have credentials for. Serves card images to the web app. (Originally
+  MinIO; switched after MinIO discontinued its free community images and
+  the replacement required a paid license just to serve S3 traffic --
+  see `docker-compose.yml`'s comment on the `garage` service.) Public
+  reads go through nginx (`nginx-web.conf`), which proxies `/collections/`
+  to Garage's website port with the Host header it needs -- Garage's
+  public-read mechanism is Host-based, not path-based like MinIO's was.
 - **web** — the Dioxus web frontend, built from `proxynexus-rs/proxynexus-gui`
   with a patch that makes the image-serving base URL configurable at
   build time (`PROXYNEXUS_COLLECTIONS_URL`) instead of hardcoded to the
