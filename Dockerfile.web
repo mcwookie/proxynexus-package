@@ -5,7 +5,14 @@
 # dioxus 0.7.5. If a future version bump in the repo breaks this again,
 # check the error message (it reports both versions directly) and update
 # the --version below to match.
-FROM rust:latest AS builder
+#
+# Pinned by digest, not `rust:latest` -- confirmed via a real build
+# failure (2026-10-05) that a routine `rust:latest` toolchain bump broke
+# dx's wasm-bindgen post-processing step (unrelated to any app code
+# change). This digest is the last image known to build successfully
+# (2026-09-20). Bump deliberately, not by drift: re-pull `rust:latest`,
+# test a full `dx build`, then update this digest.
+FROM rust:latest@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS builder
 
 RUN apt-get update && apt-get install -y clang git && rm -rf /var/lib/apt/lists/*
 
