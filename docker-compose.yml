@@ -36,11 +36,19 @@ services:
   # One-shot init: mirrors in the bundled collection images from
   # ./data/collections, using the key garage-entrypoint.sh generated.
   # Runs on every `docker compose up` and exits when done -- that's
-  # expected, and safe to re-run (mc mirror --overwrite only touches
-  # what's actually changed). Public read access is already configured by
+  # expected, and safe to re-run (rclone sync only touches what's
+  # actually changed). Public read access is already configured by
   # garage-entrypoint.sh's `bucket website --allow`, not here.
+  #
+  # Was quay.io/minio/aistor/mc -- confirmed via `docker logs` to crash
+  # on this host's CPU with "Fatal glibc error: CPU does not support
+  # x86-64-v2" (the same wall that killed the original MinIO server
+  # image), silently mirroring zero files every run. rclone/rclone runs
+  # fine here and was verified end to end against the live bucket: a
+  # real sync of the full ~11GB collection (16,731 files), then a real
+  # image fetch through nginx afterward, both succeeded.
   garage-init:
-    image: quay.io/minio/aistor/mc:RELEASE.2026-09-19T15-24-59Z
+    image: rclone/rclone:latest
     depends_on:
       garage:
         condition: service_healthy
@@ -50,8 +58,14 @@ services:
     entrypoint: >
       /bin/sh -c "
       . /shared/garage-credentials.env &&
-      mc alias set local http://garage:3900 $$GARAGE_KEY_ID $$GARAGE_SECRET &&
-      mc mirror --overwrite /collections local/proxynexus-collections
+      export RCLONE_CONFIG_S3_TYPE=s3 &&
+      export RCLONE_CONFIG_S3_PROVIDER=Other &&
+      export RCLONE_CONFIG_S3_ENV_AUTH=false &&
+      export RCLONE_CONFIG_S3_ACCESS_KEY_ID=$$GARAGE_KEY_ID &&
+      export RCLONE_CONFIG_S3_SECRET_ACCESS_KEY=$$GARAGE_SECRET &&
+      export RCLONE_CONFIG_S3_ENDPOINT=http://garage:3900 &&
+      export RCLONE_CONFIG_S3_REGION=garage &&
+      rclone sync /collections s3:proxynexus-collections --s3-no-check-bucket
       "
 
   web:
