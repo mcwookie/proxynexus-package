@@ -75,3 +75,13 @@ jobs:
             PROXYNEXUS_COLLECTIONS_URL=${{ secrets.PROXYNEXUS_COLLECTIONS_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: [self-hosted, proxynexus-docker-host]
+    steps:
+      - name: Pull and recreate web container
+        run: |
+          cd /mnt/data1/bvogle/forked-repos/proxynexus-package
+          docker compose pull web
+          docker compose up -d web
